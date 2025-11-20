@@ -1,0 +1,147 @@
+const fs = require('fs');
+const path = require('path');
+
+const pointsFile = path.join(__dirname, '../data/ranks.json');   // الرصيد الحالي
+const xpFile = path.join(__dirname, '../data/xp.json');          // النقاط التراكمية لكل العضو
+const levelsFile = path.join(__dirname, '../data/levels.json');  // الفلات والشارات
+
+// تحميل الملفات أو إنشاءها فارغة
+let points = fs.existsSync(pointsFile) ? JSON.parse(fs.readFileSync(pointsFile)) : {};
+let xp = fs.existsSync(xpFile) ? JSON.parse(fs.readFileSync(xpFile)) : {};
+let levels = fs.existsSync(levelsFile) ? JSON.parse(fs.readFileSync(levelsFile)) : {};
+
+const ARISE_LEVEL = '𝐀𝐑𝐈𝐒𝐄 𝐋𝐄𝐕𝐄𝐋';
+
+// الرتب حسب ذوقك والزخرفة
+const rankTitles = [
+  '🛡️ جندي ⚔️',
+  '🗡️ محارب 🏹',
+  '🎖️ ملازم 🏰',
+  '🐎 فارس ⚡',
+  '🔥 مارشال 💥',
+  '💎 جنرال ⚜️',
+  '🌟 قائد أعلى ✨',
+  '🌑 ملك الظلال 👑'
+];
+
+// النقاط المطلوبة لكل رتبة
+const rankThresholds = [
+  0,
+  100_000,
+  300_000,
+  700_000,
+  1_500_000,
+  3_000_000,
+  6_000_000,
+  10_000_000
+];
+
+// تحويل الأرقام لصيغة K/M
+function formatK(num) {
+  if (num >= 1_000_000) return (num / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'm';
+  if (num >= 1000) return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+  return num.toString();
+}
+
+// حفظ جميع الملفات
+function saveData() {
+  fs.writeFileSync(pointsFile, JSON.stringify(points, null, 2));
+  fs.writeFileSync(xpFile, JSON.stringify(xp, null, 2));
+  fs.writeFileSync(levelsFile, JSON.stringify(levels, null, 2));
+}
+
+// تحديث مستوى العضو بناءً على XP التراكمي
+function updateLevel(sender) {
+  if (!levels[sender]) levels[sender] = { level: 0, title: rankTitles[0], purchases: 0 };
+  if (!xp[sender]) xp[sender] = 0;
+
+  let newLevel = 0;
+  for (let i = 0; i < rankThresholds.length; i++) {
+    if (xp[sender] >= rankThresholds[i]) newLevel = i;
+  }
+  levels[sender].level = newLevel;
+  levels[sender].title = rankTitles[newLevel];
+
+  saveData();
+}
+
+// إضافة نقاط → يزيد الرصيد الحالي + XP تراكمي
+function addPoints(sender, amount) {
+  if (!points[sender]) points[sender] = 0;
+  if (!xp[sender]) xp[sender] = 0;
+  if (!levels[sender]) levels[sender] = { level: 0, title: rankTitles[0], purchases: 0 };
+
+  points[sender] += amount;  // زيادة الرصيد
+  xp[sender] += amount;      // زيادة XP التراكمي
+  updateLevel(sender);
+}
+
+// خصم نقاط → ينقص الرصيد فقط، XP التراكمي لا يتأثر
+function subtractPoints(sender, amount) {
+  if (!points[sender]) points[sender] = 0;
+
+  points[sender] -= amount;
+  if (points[sender] < 0) points[sender] = 0;
+
+  saveData();
+}
+
+// تسجيل شراء → ينقص الرصيد ويزيد الشارات
+function purchase(sender, cost) {
+  if (!points[sender]) points[sender] = 0;
+  if (!levels[sender]) levels[sender] = { level: 0, title: rankTitles[0], purchases: 0 };
+
+  if (points[sender] < cost) return false;
+
+  points[sender] -= cost;
+  levels[sender].purchases += 1;
+  saveData();
+  return true;
+}
+
+// الحصول على حالة العضو
+function getStatus(sender) {
+  if (!points[sender]) points[sender] = 0;
+  if (!xp[sender]) xp[sender] = 0;
+  if (!levels[sender]) levels[sender] = { level: 0, title: rankTitles[0], purchases: 0 };
+
+  return {
+    points: points[sender],
+    xp: xp[sender],
+    title: levels[sender].title,
+    level: levels[sender].level,
+    purchases: levels[sender].purchases
+  };
+}
+
+// الأمر الرئيسي للبوت
+module.exports = {
+  command: 'رصيدي',
+  category: 'info',
+  description: 'اعرض رصيدك، XP، ورتبتك في ARISE LEVEL 🎯',
+
+  async execute(sock, msg) {
+    const sender = msg.key.participant || msg.key.remoteJid;
+
+    if (!points[sender]) points[sender] = 0;
+    if (!xp[sender]) xp[sender] = 0;
+    if (!levels[sender]) levels[sender] = { level: 0, title: rankTitles[0], purchases: 0 };
+
+    updateLevel(sender);
+
+    const { title, level } = levels[sender];
+    const formattedPoints = formatK(points[sender]);
+
+    await sock.sendMessage(msg.key.remoteJid, {
+      text: `رصيدك الحالي 💰: *${formattedPoints}* نقطة\n` +
+            `${ARISE_LEVEL}: *${title}*\n` +
+            `> *Level ${level}*`
+    }, { quoted: msg });
+  }
+};
+
+// تصدير الدوال لاستخدامها في أي أوامر إضافة/خصم/شراء
+module.exports.addPoints = addPoints;
+module.exports.subtractPoints = subtractPoints;
+module.exports.purchase = purchase;
+module.exports.getStatus = getStatus;

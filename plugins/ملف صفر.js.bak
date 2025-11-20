@@ -1,0 +1,28 @@
+import fs from 'fs';
+import path from 'path';
+
+const ranksFile = path.join('./data/ranks.json');
+
+// اللي مسموح لهم ينفذون الأمر
+const allowedLIDs = ['227552333414482', '213773231685'];
+
+// الكود للأمر
+export default {
+  name: 'صفر',
+  description: '✅ تصفير جميع النقاط (لـ LID محدد)',
+  async execute(message, client) {
+    const senderLid = message.sender.id || message.sender; // حسب شكل الرسالة عندك
+
+    if (!allowedLIDs.includes(senderLid)) {
+      return client.sendMessage(message.chatId, '❌ أنت غير مخول لتصفير النقاط.');
+    }
+
+    try {
+      fs.writeFileSync(ranksFile, '{}', 'utf8');
+      await client.sendMessage(message.chatId, '✅ تم تصفير جميع النقاط بنجاح.');
+    } catch (err) {
+      console.error(err);
+      await client.sendMessage(message.chatId, '❌ حدث خطأ أثناء محاولة تصفير النقاط.');
+    }
+  }
+};

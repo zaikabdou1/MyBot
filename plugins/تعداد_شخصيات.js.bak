@@ -1,0 +1,81 @@
+const fs = require("fs");
+const path = require("path");
+const challenges = require("./challenges.js"); // استيراد ملف الأسئلة
+
+const pointsFile = path.join(__dirname, "../data/ranks.json");
+let points = {};
+if (fs.existsSync(pointsFile)) points = JSON.parse(fs.readFileSync(pointsFile));
+function savePoints() { fs.writeFileSync(pointsFile, JSON.stringify(points, null, 2)); }
+
+function formatK(num) {
+  if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + "M";
+  if (num >= 1_000) return (num / 1_000).toFixed(1) + "K";
+  return num.toString();
+}
+
+// مقارنة جزئية
+function isAnswerCorrect(answer, correctAnswer) {
+  return correctAnswer.includes(answer) || answer.includes(correctAnswer);
+}
+
+// تحقق من الرسالة حسب الإجابات المطلوبة (3 من أصل 6)
+function checkAnswer(message, answers) {
+  const words = message.replace(/\n/g, " ").replace(/[.,]/g, " ").trim().split(/\s+/);
+  let count = 0;
+  for (let ans of answers) {
+    if (words.some(w => isAnswerCorrect(w, ans))) count++;
+    if (count >= 3) break;
+  }
+  return count >= 3;
+}
+
+module.exports = {
+  command: "تعداد",
+  category: "game",
+  description: "لعبة تعداد الشخصيات",
+
+  async execute(sock, msg) {
+    const chatId = msg.key.remoteJid;
+    if (!chatId.endsWith("@g.us")) return sock.sendMessage(chatId, { text: "❌ هذا الأمر يعمل فقط في المجموعات." }, { quoted: msg });
+
+    // اختيار سؤال عشوائي من ملف challenges.js
+    const challenge = challenges[Math.floor(Math.random() * challenges.length)];
+    await sock.sendMessage(chatId, { text: `🎮 تحدي جديد!\n${challenge.question}\n🕒 عندك 30 ثانية.` }, { quoted: msg });
+
+    const filter = (m) => {
+      if (m.key.remoteJid !== chatId || !m.message?.conversation) return false;
+      return checkAnswer(m.message.conversation, challenge.answers);
+    };
+
+    const onMessage = async ({ messages }) => {
+      const correct = messages.find(filter);
+      if (!correct) return;
+
+      const sender = correct.key.participant || correct.key.remoteJid;
+
+      // حساب عدد الإجابات الصحيحة من أصل 3 على الأقل
+      const text = correct.message.conversation;
+      let correctCount = 0;
+      for (let ans of challenge.answers) {
+        if (text.split(/\s+/).some(w => isAnswerCorrect(w, ans))) correctCount++;
+        if (correctCount >= 3) break;
+      }
+
+      const pointsGained = 500 * correctCount;
+      if (!points[sender]) points[sender] = 0;
+      points[sender] += pointsGained;
+      savePoints();
+
+      await sock.sendMessage(chatId, {
+        text: `✅ إجابة صحيحة! 🎉\n🏆 رصيدك الآن: *${formatK(points[sender])}* نقطة.`,
+      }, { quoted: correct });
+    };
+
+    sock.ev.on("messages.upsert", onMessage);
+
+    setTimeout(async () => {
+      sock.ev.off("messages.upsert", onMessage);
+      await sock.sendMessage(chatId, { text: `⏰ انتهى الوقت!` }, { quoted: msg });
+    }, 30000);
+  }
+};
